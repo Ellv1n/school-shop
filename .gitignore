@@ -1,0 +1,9 @@
+# backend/.gitignore
+node_modules/
+.env
+uploads/
+
+# frontend/.gitignore
+node_modules/
+.next/
+.env.local
