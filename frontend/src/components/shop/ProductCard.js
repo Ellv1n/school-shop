@@ -4,8 +4,7 @@ import Image from 'next/image';
 import { ShoppingCart, Star, Package } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useCartStore } from '@/store/cart.store';
-import { formatPrice, getImageUrl, truncate } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { formatPrice, getImageUrl, truncate, cn } from '@/lib/utils';
 
 export default function ProductCard({ product }) {
   const { isAuthenticated } = useAuthStore();
@@ -22,27 +21,26 @@ export default function ProductCard({ product }) {
   };
 
   const isOutOfStock = product.stock === 0;
+  const imageUrl = getImageUrl(product.image);
 
   return (
     <Link href={`/products/${product.id}`} className="group">
       <div className="card overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-        {/* Image */}
         <div className="relative aspect-square bg-slate-50 overflow-hidden">
-          {product.image ? (
+          {imageUrl ? (
             <Image
-              src={getImageUrl(product.image)}
-              alt={product.nameAz}
+              src={imageUrl}
+              alt={product.nameAz || product.name}
               fill
               className="object-cover group-hover:scale-105 transition-transform duration-500"
               sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+              unoptimized
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <span className="text-6xl opacity-40">🎒</span>
             </div>
           )}
-
-          {/* Badges */}
           <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
             {product.featured && (
               <span className="badge bg-accent-500 text-white shadow-sm">
@@ -58,26 +56,22 @@ export default function ProductCard({ product }) {
           </div>
         </div>
 
-        {/* Content */}
         <div className="p-4">
           <p className="text-xs text-primary-600 font-medium mb-1 truncate">
-            {product.category?.nameAz}
+            {product.category?.nameAz || ''}
           </p>
           <h3 className="font-semibold text-slate-800 text-sm leading-snug mb-2 line-clamp-2 group-hover:text-primary-700 transition-colors">
-            {product.nameAz}
+            {product.nameAz || product.name}
           </h3>
-
-          {product.descriptionAz && (
+          {(product.descriptionAz || product.description) && (
             <p className="text-xs text-slate-500 mb-3 line-clamp-2 leading-relaxed">
-              {truncate(product.descriptionAz, 70)}
+              {truncate(product.descriptionAz || product.description, 70)}
             </p>
           )}
-
           <div className="flex items-center justify-between mt-3">
             <span className="font-display font-bold text-lg text-slate-900">
               {formatPrice(product.price)}
             </span>
-
             <button
               onClick={handleAddToCart}
               disabled={isOutOfStock}

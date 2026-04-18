@@ -5,18 +5,26 @@ import Image from 'next/image';
 import { X, Plus, Minus, ShoppingCart, ShoppingBag, Trash2 } from 'lucide-react';
 import { useCartStore } from '@/store/cart.store';
 import { useAuthStore } from '@/store/auth.store';
-import { formatPrice, getImageUrl } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { formatPrice, getImageUrl, cn } from '@/lib/utils';
 
 export default function CartDrawer() {
-  const { isOpen, setOpen, serverCart, items, removeFromCartServer, removeFromCartLocal,
-    updateCartItemServer, updateQuantityLocal, getItemCount, getTotal } = useCartStore();
+  const {
+    isOpen, setOpen, serverCart, items,
+    removeFromCartServer, removeFromCartLocal,
+    updateCartItemServer, updateQuantityLocal,
+    getItemCount, getTotal,
+  } = useCartStore();
   const { isAuthenticated } = useAuthStore();
   const authenticated = isAuthenticated();
 
   const cartItems = authenticated
     ? (serverCart?.items || [])
-    : items.map(i => ({ id: i.productId, product: i.product, quantity: i.quantity, productId: i.productId }));
+    : items.map(i => ({
+        id: i.productId,
+        product: i.product,
+        quantity: i.quantity,
+        productId: i.productId,
+      }));
 
   const total = getTotal(authenticated);
   const count = getItemCount(authenticated);
@@ -38,9 +46,13 @@ export default function CartDrawer() {
     else updateQuantityLocal(item.productId, newQty);
   };
 
+  const imgSrc = (item) => {
+    const path = item?.product?.image;
+    return getImageUrl(path);
+  };
+
   return (
     <>
-      {/* Backdrop */}
       <div
         className={cn(
           'fixed inset-0 bg-black/50 z-50 transition-opacity duration-300',
@@ -48,8 +60,6 @@ export default function CartDrawer() {
         )}
         onClick={() => setOpen(false)}
       />
-
-      {/* Drawer */}
       <div className={cn(
         'fixed right-0 top-0 h-full w-full max-w-md bg-white z-50 shadow-2xl flex flex-col transition-transform duration-300 ease-out',
         isOpen ? 'translate-x-0' : 'translate-x-full'
@@ -85,50 +95,45 @@ export default function CartDrawer() {
             <ul className="space-y-1 px-4">
               {cartItems.map(item => (
                 <li key={item.id} className="flex gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group">
-                  {/* Image */}
                   <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                    {item.product?.image ? (
+                    {imgSrc(item) ? (
                       <Image
-                        src={getImageUrl(item.product.image)}
-                        alt={item.product.nameAz}
+                        src={imgSrc(item)}
+                        alt={item.product?.nameAz || ''}
                         width={64} height={64}
                         className="w-full h-full object-cover"
+                        unoptimized
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-2xl">
-                        📦
-                      </div>
+                      <div className="w-full h-full flex items-center justify-center text-2xl">📦</div>
                     )}
                   </div>
-
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-slate-800 truncate">{item.product?.nameAz}</p>
+                    <p className="font-medium text-sm text-slate-800 truncate">
+                      {item.product?.nameAz || item.product?.name}
+                    </p>
                     <p className="text-sm text-primary-600 font-semibold mt-0.5">
                       {formatPrice(item.product?.price)}
                     </p>
-
                     <div className="flex items-center justify-between mt-2">
-                      {/* Qty controls */}
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleUpdateQty(item, -1)}
-                          className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                          className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center"
                         >
                           <Minus className="w-3 h-3" />
                         </button>
                         <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
                         <button
                           onClick={() => handleUpdateQty(item, 1)}
-                          className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                          className="w-6 h-6 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
                       </div>
-                      
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-slate-800">
-                          {formatPrice(parseFloat(item.product?.price) * item.quantity)}
+                          {formatPrice(parseFloat(item.product?.price || 0) * item.quantity)}
                         </span>
                         <button
                           onClick={() => handleRemove(item)}
@@ -152,18 +157,10 @@ export default function CartDrawer() {
               <span className="text-slate-600">Cəmi:</span>
               <span className="font-display font-bold text-xl text-slate-900">{formatPrice(total)}</span>
             </div>
-            <Link
-              href="/checkout"
-              onClick={() => setOpen(false)}
-              className="btn btn-primary w-full btn-lg"
-            >
-              <ShoppingBag className="w-5 h-5" />
-              Sifarişi tamamla
+            <Link href="/checkout" onClick={() => setOpen(false)} className="btn btn-primary w-full btn-lg">
+              <ShoppingBag className="w-5 h-5" /> Sifarişi tamamla
             </Link>
-            <button
-              onClick={() => setOpen(false)}
-              className="btn btn-secondary w-full"
-            >
+            <button onClick={() => setOpen(false)} className="btn btn-secondary w-full">
               Alış-verişə davam et
             </button>
           </div>

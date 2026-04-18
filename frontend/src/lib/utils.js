@@ -25,11 +25,11 @@ export function formatDate(dateStr) {
 
 export const ORDER_STATUS_LABELS = {
   PENDING:    { label: 'Gözləyir',      color: 'bg-yellow-100 text-yellow-800' },
-  CONFIRMED:  { label: 'Təsdiqləndi',   color: 'bg-blue-100 text-blue-800'   },
-  PROCESSING: { label: 'Hazırlanır',    color: 'bg-purple-100 text-purple-800'},
-  SHIPPED:    { label: 'Göndərildi',    color: 'bg-indigo-100 text-indigo-800'},
-  DELIVERED:  { label: 'Çatdırıldı',   color: 'bg-green-100 text-green-800'  },
-  CANCELLED:  { label: 'Ləğv edildi',   color: 'bg-red-100 text-red-800'     },
+  CONFIRMED:  { label: 'Təsdiqləndi',   color: 'bg-blue-100 text-blue-800'    },
+  PROCESSING: { label: 'Hazırlanır',    color: 'bg-purple-100 text-purple-800' },
+  SHIPPED:    { label: 'Göndərildi',    color: 'bg-indigo-100 text-indigo-800' },
+  DELIVERED:  { label: 'Çatdırıldı',   color: 'bg-green-100 text-green-800'   },
+  CANCELLED:  { label: 'Ləğv edildi',   color: 'bg-red-100 text-red-800'      },
 };
 
 export function getErrorMessage(error) {
@@ -43,4 +43,14 @@ export function getErrorMessage(error) {
 
 export function truncate(str, n = 80) {
   return str?.length > n ? str.substring(0, n) + '…' : str;
+}
+
+// Image URL helper — works in both client and server contexts
+export function getImageUrl(path) {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  const base =
+    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) ||
+    'http://localhost:5000';
+  return `${base}${path}`;
 }
