@@ -1,76 +1,32 @@
 const jwt = require('jsonwebtoken');
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 
 const authenticate = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Access denied. No token provided.' 
-      });
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'Token tapılmadı.' });
     }
-
-    const token = authHeader.substring(7);
-    
+    const token = auth.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, name: true, email: true, role: true }
-    });
-
-    if (!user) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'User not found. Token invalid.' 
-      });
-    }
-
-    req.user = user;
+    const { rows } = await query(
+      'SELECT id, name, email, role FROM users WHERE id=$1',
+      [decoded.userId]
+    );
+    if (!rows[0]) return res.status(401).json({ success: false, message: 'İstifadəçi tapılmadı.' });
+    req.user = rows[0];
     next();
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Token expired. Please login again.' 
-      });
-    }
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid token.' 
-      });
-    }
-    next(error);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError')
+      return res.status(401).json({ success: false, message: 'Token müddəti bitib.' });
+    return res.status(401).json({ success: false, message: 'Token etibarsızdır.' });
   }
 };
 
 const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'ADMIN') {
-    return res.status(403).json({ 
-      success: false, 
-      message: 'Access denied. Admin privileges required.' 
-    });
-  }
+  if (req.user?.role !== 'ADMIN')
+    return res.status(403).json({ success: false, message: 'Admin icazəsi tələb olunur.' });
   next();
 };
 
-const optionalAuth = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: { id: true, name: true, email: true, role: true }
-      });
-      req.user = user;
-    }
-  } catch {}
-  next();
-};
-
-module.exports = { authenticate, requireAdmin, optionalAuth };
+module.exports = { authenticate, requireAdmin };

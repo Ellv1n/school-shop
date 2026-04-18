@@ -1,81 +1,70 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
+const { v4: uuidv4 } = require('uuid');
 const { AppError } = require('../middleware/error.middleware');
 
 const getAllCategories = async (req, res, next) => {
   try {
-    const categories = await prisma.category.findMany({
-      include: {
-        _count: { select: { products: { where: { isActive: true } } } }
-      },
-      orderBy: { name: 'asc' }
-    });
-    res.json({ success: true, data: categories });
-  } catch (error) {
-    next(error);
-  }
+    const { rows } = await query(`
+      SELECT c.*, COUNT(p.id) FILTER (WHERE p.is_active=true) AS product_count
+      FROM categories c
+      LEFT JOIN products p ON p.category_id = c.id
+      GROUP BY c.id ORDER BY c.name_az
+    `);
+    res.json({ success: true, data: rows.map(r => ({
+      ...r, _count: { products: parseInt(r.product_count) }
+    }))});
+  } catch (err) { next(err); }
 };
 
 const getCategoryBySlug = async (req, res, next) => {
   try {
-    const { slug } = req.params;
-    const category = await prisma.category.findUnique({
-      where: { slug },
-      include: { _count: { select: { products: true } } }
-    });
-    if (!category) throw new AppError('Category not found.', 404);
-    res.json({ success: true, data: category });
-  } catch (error) {
-    next(error);
-  }
+    const { rows } = await query('SELECT * FROM categories WHERE slug=$1', [req.params.slug]);
+    if (!rows[0]) throw new AppError('Kateqoriya tapılmadı.', 404);
+    res.json({ success: true, data: rows[0] });
+  } catch (err) { next(err); }
 };
 
 const createCategory = async (req, res, next) => {
   try {
     const { name, nameAz, description, icon } = req.body;
     const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-
-    const category = await prisma.category.create({
-      data: { name, nameAz, slug, description, icon }
-    });
-    res.status(201).json({ success: true, message: 'Category created.', data: category });
-  } catch (error) {
-    next(error);
-  }
+    const id = uuidv4();
+    const { rows } = await query(
+      `INSERT INTO categories (id, name, name_az, slug, description, icon)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [id, name, nameAz, slug, description || null, icon || null]
+    );
+    res.status(201).json({ success: true, message: 'Kateqoriya yaradıldı.', data: rows[0] });
+  } catch (err) { next(err); }
 };
 
 const updateCategory = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, nameAz, description, icon } = req.body;
-    
-    const updateData = { nameAz, description, icon };
-    if (name) {
-      updateData.name = name;
-      updateData.slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    }
-
-    const category = await prisma.category.update({
-      where: { id },
-      data: updateData
-    });
-    res.json({ success: true, message: 'Category updated.', data: category });
-  } catch (error) {
-    next(error);
-  }
+    const slug = name ? name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') : null;
+    const { rows } = await query(
+      `UPDATE categories SET
+        name=COALESCE($1,name), name_az=COALESCE($2,name_az),
+        slug=COALESCE($3,slug), description=COALESCE($4,description),
+        icon=COALESCE($5,icon), updated_at=NOW()
+       WHERE id=$6 RETURNING *`,
+      [name, nameAz, slug, description, icon, id]
+    );
+    if (!rows[0]) throw new AppError('Kateqoriya tapılmadı.', 404);
+    res.json({ success: true, message: 'Yeniləndi.', data: rows[0] });
+  } catch (err) { next(err); }
 };
 
 const deleteCategory = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const productCount = await prisma.product.count({ where: { categoryId: id } });
-    if (productCount > 0) {
-      throw new AppError(`Cannot delete category. It has ${productCount} products.`, 400);
-    }
-    await prisma.category.delete({ where: { id } });
-    res.json({ success: true, message: 'Category deleted.' });
-  } catch (error) {
-    next(error);
-  }
+    const { rows } = await query('SELECT COUNT(*) FROM products WHERE category_id=$1', [id]);
+    if (parseInt(rows[0].count) > 0)
+      throw new AppError(`Bu kateqoriyada ${rows[0].count} məhsul var. Əvvəlcə məhsulları silin.`, 400);
+    await query('DELETE FROM categories WHERE id=$1', [id]);
+    res.json({ success: true, message: 'Silindi.' });
+  } catch (err) { next(err); }
 };
 
 module.exports = { getAllCategories, getCategoryBySlug, createCategory, updateCategory, deleteCategory };

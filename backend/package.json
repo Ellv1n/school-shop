@@ -1,19 +1,13 @@
 {
   "name": "mekteb-store-backend",
   "version": "1.0.0",
-  "description": "Məktəb Ləvazimatları E-Commerce Backend",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "build": "npx prisma generate && node src/utils/migrate-and-seed.js",
-    "db:migrate": "npx prisma migrate dev",
-    "db:generate": "npx prisma generate",
-    "db:seed": "node src/utils/seed.js",
-    "db:studio": "npx prisma studio"
+    "build": "node src/utils/init-db.js"
   },
   "dependencies": {
-    "@prisma/client": "^5.10.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
@@ -23,8 +17,8 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "uuid": "^9.0.0",
-    "prisma": "^5.10.0"
+    "pg": "^8.11.3",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"

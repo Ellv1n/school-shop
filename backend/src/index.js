@@ -5,71 +5,61 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 
-const authRoutes = require('./routes/auth.routes');
+const authRoutes     = require('./routes/auth.routes');
 const categoryRoutes = require('./routes/category.routes');
-const productRoutes = require('./routes/product.routes');
-const cartRoutes = require('./routes/cart.routes');
-const orderRoutes = require('./routes/order.routes');
-const adminRoutes = require('./routes/admin.routes');
+const productRoutes  = require('./routes/product.routes');
+const cartRoutes     = require('./routes/cart.routes');
+const orderRoutes    = require('./routes/order.routes');
+const adminRoutes    = require('./routes/admin.routes');
 const { errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security middleware
+// Security
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // CORS
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // Logging
-if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan('combined'));
-}
+if (process.env.NODE_ENV !== 'test') app.use(morgan('combined'));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static files (uploaded images)
+// Static files
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    service: 'Məktəb Ləvazimatları API'
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'Məktəb Ləvazimatları API' });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
+// Routes
+app.use('/api/auth',       authRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/products',   productRoutes);
+app.use('/api/cart',       cartRoutes);
+app.use('/api/orders',     orderRoutes);
+app.use('/api/admin',      adminRoutes);
 
-// 404 handler
+// 404
 app.use('*', (req, res) => {
-  res.status(404).json({ 
-    success: false, 
-    message: `Route ${req.originalUrl} not found` 
-  });
+  res.status(404).json({ success: false, message: `${req.originalUrl} tapılmadı` });
 });
 
-// Global error handler
+// Error handler
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 Məktəb Ləvazimatları API ready`);
+  console.log(`🚀 Server: http://localhost:${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
 });
 

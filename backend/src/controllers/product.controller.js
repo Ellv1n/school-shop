@@ -1,118 +1,106 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
+const { v4: uuidv4 } = require('uuid');
 const { AppError } = require('../middleware/error.middleware');
 const path = require('path');
 const fs = require('fs');
 
 const getProducts = async (req, res, next) => {
   try {
-    const {
-      page = 1,
-      limit = 12,
-      categoryId,
-      categorySlug,
-      search,
-      featured,
-      minPrice,
-      maxPrice,
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
-    } = req.query;
+    const { page = 1, limit = 12, categoryId, categorySlug, search, featured, sortBy = 'created_at', sortOrder = 'desc' } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const conditions = ['p.is_active=true'];
+    const params = [];
+    let pi = 1;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const where = { isActive: true };
-
-    if (categoryId) where.categoryId = categoryId;
     if (categorySlug) {
-      const category = await prisma.category.findUnique({ where: { slug: categorySlug } });
-      if (category) where.categoryId = category.id;
+      params.push(categorySlug);
+      conditions.push(`c.slug=$${pi++}`);
     }
-    if (featured === 'true') where.featured = true;
+    if (categoryId) {
+      params.push(categoryId);
+      conditions.push(`p.category_id=$${pi++}`);
+    }
+    if (featured === 'true') conditions.push('p.featured=true');
     if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { nameAz: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } }
-      ];
-    }
-    if (minPrice || maxPrice) {
-      where.price = {};
-      if (minPrice) where.price.gte = parseFloat(minPrice);
-      if (maxPrice) where.price.lte = parseFloat(maxPrice);
+      params.push(`%${search}%`);
+      conditions.push(`(p.name_az ILIKE $${pi} OR p.name ILIKE $${pi++})`);
     }
 
-    const validSortFields = ['createdAt', 'price', 'name', 'stock'];
-    const orderBy = validSortFields.includes(sortBy)
-      ? { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' }
-      : { createdAt: 'desc' };
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const validSort = { createdAt: 'p.created_at', price: 'p.price', name: 'p.name_az', stock: 'p.stock' };
+    const orderCol = validSort[sortBy] || 'p.created_at';
+    const orderDir = sortOrder === 'asc' ? 'ASC' : 'DESC';
 
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        include: { category: true },
-        orderBy,
-        skip,
-        take: parseInt(limit)
-      }),
-      prisma.product.count({ where })
+    const countParams = [...params];
+    const dataParams = [...params, parseInt(limit), offset];
+
+    const [countRes, dataRes] = await Promise.all([
+      query(`SELECT COUNT(*) FROM products p LEFT JOIN categories c ON c.id=p.category_id ${where}`, countParams),
+      query(
+        `SELECT p.*, c.id as cat_id, c.name as cat_name, c.name_az as cat_name_az, c.slug as cat_slug
+         FROM products p LEFT JOIN categories c ON c.id=p.category_id
+         ${where} ORDER BY ${orderCol} ${orderDir}
+         LIMIT $${pi++} OFFSET $${pi++}`,
+        dataParams
+      ),
     ]);
 
-    res.json({
-      success: true,
-      data: products,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        totalPages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
+    const total = parseInt(countRes.rows[0].count);
+    const products = dataRes.rows.map(r => ({
+      ...r,
+      category: { id: r.cat_id, name: r.cat_name, nameAz: r.cat_name_az, slug: r.cat_slug },
+    }));
+
+    res.json({ success: true, data: products, pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) } });
+  } catch (err) { next(err); }
 };
 
 const getProductById = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: { category: true }
-    });
-    if (!product || !product.isActive) throw new AppError('Product not found.', 404);
-    res.json({ success: true, data: product });
-  } catch (error) {
-    next(error);
-  }
+    const { rows } = await query(
+      `SELECT p.*, c.id as cat_id, c.name as cat_name, c.name_az as cat_name_az, c.slug as cat_slug
+       FROM products p LEFT JOIN categories c ON c.id=p.category_id
+       WHERE p.id=$1 AND p.is_active=true`,
+      [req.params.id]
+    );
+    if (!rows[0]) throw new AppError('Məhsul tapılmadı.', 404);
+    const r = rows[0];
+    res.json({ success: true, data: { ...r, category: { id: r.cat_id, name: r.cat_name, nameAz: r.cat_name_az, slug: r.cat_slug } } });
+  } catch (err) { next(err); }
+};
+
+const getFeaturedProducts = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.*, c.id as cat_id, c.name as cat_name, c.name_az as cat_name_az, c.slug as cat_slug
+       FROM products p LEFT JOIN categories c ON c.id=p.category_id
+       WHERE p.featured=true AND p.is_active=true
+       ORDER BY p.created_at DESC LIMIT 8`
+    );
+    const products = rows.map(r => ({ ...r, category: { id: r.cat_id, name: r.cat_name, nameAz: r.cat_name_az, slug: r.cat_slug } }));
+    res.json({ success: true, data: products });
+  } catch (err) { next(err); }
 };
 
 const createProduct = async (req, res, next) => {
   try {
     const { name, nameAz, description, descriptionAz, price, stock, categoryId, featured } = req.body;
+    if (!name || !nameAz || !price || !categoryId) throw new AppError('Ad, qiymət və kateqoriya tələb olunur.', 400);
+
+    const catCheck = await query('SELECT id FROM categories WHERE id=$1', [categoryId]);
+    if (!catCheck.rows[0]) throw new AppError('Kateqoriya tapılmadı.', 404);
+
     const image = req.file ? `/uploads/products/${req.file.filename}` : null;
-
-    const category = await prisma.category.findUnique({ where: { id: categoryId } });
-    if (!category) throw new AppError('Category not found.', 404);
-
-    const product = await prisma.product.create({
-      data: {
-        name, nameAz,
-        description, descriptionAz,
-        price: parseFloat(price),
-        stock: parseInt(stock),
-        categoryId,
-        image,
-        featured: featured === 'true' || featured === true
-      },
-      include: { category: true }
-    });
-
-    res.status(201).json({ success: true, message: 'Product created.', data: product });
-  } catch (error) {
-    if (req.file) {
-      fs.unlink(req.file.path, () => {});
-    }
-    next(error);
+    const id = uuidv4();
+    const { rows } = await query(
+      `INSERT INTO products (id,name,name_az,description,description_az,price,stock,category_id,image,featured)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [id, name, nameAz, description||null, descriptionAz||null, parseFloat(price), parseInt(stock)||0, categoryId, image, featured==='true'||featured===true]
+    );
+    res.status(201).json({ success: true, message: 'Məhsul yaradıldı.', data: rows[0] });
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    next(err);
   }
 };
 
@@ -121,71 +109,44 @@ const updateProduct = async (req, res, next) => {
     const { id } = req.params;
     const { name, nameAz, description, descriptionAz, price, stock, categoryId, featured, isActive } = req.body;
 
-    const existing = await prisma.product.findUnique({ where: { id } });
-    if (!existing) throw new AppError('Product not found.', 404);
+    const existing = await query('SELECT * FROM products WHERE id=$1', [id]);
+    if (!existing.rows[0]) throw new AppError('Məhsul tapılmadı.', 404);
 
-    const updateData = {};
-    if (name !== undefined) updateData.name = name;
-    if (nameAz !== undefined) updateData.nameAz = nameAz;
-    if (description !== undefined) updateData.description = description;
-    if (descriptionAz !== undefined) updateData.descriptionAz = descriptionAz;
-    if (price !== undefined) updateData.price = parseFloat(price);
-    if (stock !== undefined) updateData.stock = parseInt(stock);
-    if (categoryId !== undefined) updateData.categoryId = categoryId;
-    if (featured !== undefined) updateData.featured = featured === 'true' || featured === true;
-    if (isActive !== undefined) updateData.isActive = isActive === 'true' || isActive === true;
-
+    let image = existing.rows[0].image;
     if (req.file) {
-      updateData.image = `/uploads/products/${req.file.filename}`;
-      if (existing.image) {
-        const oldPath = path.join(__dirname, '../../', existing.image);
-        fs.unlink(oldPath, () => {});
-      }
+      image = `/uploads/products/${req.file.filename}`;
+      if (existing.rows[0].image) fs.unlink(path.join(__dirname, '../../', existing.rows[0].image), () => {});
     }
 
-    const product = await prisma.product.update({
-      where: { id },
-      data: updateData,
-      include: { category: true }
-    });
-
-    res.json({ success: true, message: 'Product updated.', data: product });
-  } catch (error) {
+    const { rows } = await query(
+      `UPDATE products SET
+        name=COALESCE($1,name), name_az=COALESCE($2,name_az),
+        description=COALESCE($3,description), description_az=COALESCE($4,description_az),
+        price=COALESCE($5,price), stock=COALESCE($6,stock),
+        category_id=COALESCE($7,category_id), image=$8,
+        featured=COALESCE($9,featured), is_active=COALESCE($10,is_active),
+        updated_at=NOW()
+       WHERE id=$11 RETURNING *`,
+      [name, nameAz, description, descriptionAz,
+       price ? parseFloat(price) : null,
+       stock !== undefined ? parseInt(stock) : null,
+       categoryId, image,
+       featured !== undefined ? (featured==='true'||featured===true) : null,
+       isActive !== undefined ? (isActive==='true'||isActive===true) : null,
+       id]
+    );
+    res.json({ success: true, message: 'Məhsul yeniləndi.', data: rows[0] });
+  } catch (err) {
     if (req.file) fs.unlink(req.file.path, () => {});
-    next(error);
+    next(err);
   }
 };
 
 const deleteProduct = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const product = await prisma.product.findUnique({ where: { id } });
-    if (!product) throw new AppError('Product not found.', 404);
-
-    // Soft delete
-    await prisma.product.update({ where: { id }, data: { isActive: false } });
-
-    res.json({ success: true, message: 'Product deleted.' });
-  } catch (error) {
-    next(error);
-  }
+    await query('UPDATE products SET is_active=false, updated_at=NOW() WHERE id=$1', [req.params.id]);
+    res.json({ success: true, message: 'Məhsul silindi.' });
+  } catch (err) { next(err); }
 };
 
-const getFeaturedProducts = async (req, res, next) => {
-  try {
-    const products = await prisma.product.findMany({
-      where: { featured: true, isActive: true },
-      include: { category: true },
-      take: 8,
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json({ success: true, data: products });
-  } catch (error) {
-    next(error);
-  }
-};
-
-module.exports = {
-  getProducts, getProductById, createProduct,
-  updateProduct, deleteProduct, getFeaturedProducts
-};
+module.exports = { getProducts, getProductById, getFeaturedProducts, createProduct, updateProduct, deleteProduct };
