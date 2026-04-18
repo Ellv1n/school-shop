@@ -2,12 +2,28 @@ const { query, getClient } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const { AppError } = require('../middleware/error.middleware');
 
+const normalizeOrder = (r) => ({
+  id: r.id,
+  userId: r.user_id,
+  totalPrice: r.total_price,
+  status: r.status,
+  customerName: r.customer_name,
+  customerPhone: r.customer_phone,
+  address: r.address,
+  notes: r.notes,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+  user: r.user_name ? { name: r.user_name, email: r.user_email } : undefined,
+  orderItems: r.order_items || [],
+});
+
 const createOrder = async (req, res, next) => {
   const client = await getClient();
   try {
     const { customerName, customerPhone, address, notes } = req.body;
+    if (!customerName || !customerPhone || !address)
+      throw new AppError('Ad, telefon və ünvan tələb olunur.', 400);
 
-    // Get cart
     const cartRes = await client.query('SELECT id FROM carts WHERE user_id=$1', [req.user.id]);
     if (!cartRes.rows[0]) throw new AppError('Səbətiniz boşdur.', 400);
     const cartId = cartRes.rows[0].id;
@@ -18,15 +34,17 @@ const createOrder = async (req, res, next) => {
        WHERE ci.cart_id=$1`,
       [cartId]
     );
-
     if (!itemsRes.rows.length) throw new AppError('Səbətiniz boşdur.', 400);
 
     for (const item of itemsRes.rows) {
-      if (!item.is_active) throw new AppError(`"${item.name_az}" artıq mövcud deyil.`, 400);
-      if (item.stock < item.quantity) throw new AppError(`"${item.name_az}" üçün kifayət qədər stok yoxdur.`, 400);
+      if (!item.is_active) throw new AppError(`"${item.name_az}" mövcud deyil.`, 400);
+      if (item.stock < item.quantity)
+        throw new AppError(`"${item.name_az}" üçün kifayət stok yoxdur.`, 400);
     }
 
-    const totalPrice = itemsRes.rows.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+    const totalPrice = itemsRes.rows
+      .reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0)
+      .toFixed(2);
 
     await client.query('BEGIN');
 
@@ -52,15 +70,21 @@ const createOrder = async (req, res, next) => {
     await client.query('COMMIT');
 
     const { rows } = await query(
-      `SELECT o.*, json_agg(json_build_object('id',oi.id,'quantity',oi.quantity,'price',oi.price,
-        'product',json_build_object('id',p.id,'name',p.name,'nameAz',p.name_az,'image',p.image))
-       ) as order_items
-       FROM orders o JOIN order_items oi ON oi.order_id=o.id JOIN products p ON p.id=oi.product_id
+      `SELECT o.*,
+        json_agg(json_build_object(
+          'id', oi.id, 'quantity', oi.quantity, 'price', oi.price,
+          'product', json_build_object(
+            'id', p.id, 'name', p.name, 'nameAz', p.name_az, 'image', p.image
+          )
+        )) AS order_items
+       FROM orders o
+       JOIN order_items oi ON oi.order_id=o.id
+       JOIN products p ON p.id=oi.product_id
        WHERE o.id=$1 GROUP BY o.id`,
       [orderId]
     );
 
-    res.status(201).json({ success: true, message: 'Sifariş qəbul edildi.', data: rows[0] });
+    res.status(201).json({ success: true, message: 'Sifariş qəbul edildi.', data: normalizeOrder(rows[0]) });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     next(err);
@@ -77,35 +101,54 @@ const getMyOrders = async (req, res, next) => {
     const [countRes, ordersRes] = await Promise.all([
       query('SELECT COUNT(*) FROM orders WHERE user_id=$1', [req.user.id]),
       query(
-        `SELECT o.*, COALESCE(json_agg(json_build_object('id',oi.id,'quantity',oi.quantity,
-          'product',json_build_object('id',p.id,'nameAz',p.name_az,'image',p.image))
-         ) FILTER (WHERE oi.id IS NOT NULL), '[]') as order_items
+        `SELECT o.*,
+          COALESCE(json_agg(json_build_object(
+            'id', oi.id, 'quantity', oi.quantity,
+            'product', json_build_object(
+              'id', p.id, 'nameAz', p.name_az, 'image', p.image
+            )
+          )) FILTER (WHERE oi.id IS NOT NULL), '[]') AS order_items
          FROM orders o
          LEFT JOIN order_items oi ON oi.order_id=o.id
          LEFT JOIN products p ON p.id=oi.product_id
-         WHERE o.user_id=$1 GROUP BY o.id ORDER BY o.created_at DESC
+         WHERE o.user_id=$1
+         GROUP BY o.id ORDER BY o.created_at DESC
          LIMIT $2 OFFSET $3`,
         [req.user.id, parseInt(limit), offset]
       ),
     ]);
 
     const total = parseInt(countRes.rows[0].count);
-    res.json({ success: true, data: ordersRes.rows, pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) } });
+    res.json({
+      success: true,
+      data: ordersRes.rows.map(normalizeOrder),
+      pagination: {
+        page: parseInt(page), limit: parseInt(limit),
+        total, totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
   } catch (err) { next(err); }
 };
 
 const getOrderById = async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT o.*, COALESCE(json_agg(json_build_object('id',oi.id,'quantity',oi.quantity,'price',oi.price,
-        'product',json_build_object('id',p.id,'name',p.name,'nameAz',p.name_az,'image',p.image))
-       ) FILTER (WHERE oi.id IS NOT NULL), '[]') as order_items
-       FROM orders o LEFT JOIN order_items oi ON oi.order_id=o.id LEFT JOIN products p ON p.id=oi.product_id
-       WHERE o.id=$1 AND o.user_id=$2 GROUP BY o.id`,
+      `SELECT o.*,
+        COALESCE(json_agg(json_build_object(
+          'id', oi.id, 'quantity', oi.quantity, 'price', oi.price,
+          'product', json_build_object(
+            'id', p.id, 'name', p.name, 'nameAz', p.name_az, 'image', p.image
+          )
+        )) FILTER (WHERE oi.id IS NOT NULL), '[]') AS order_items
+       FROM orders o
+       LEFT JOIN order_items oi ON oi.order_id=o.id
+       LEFT JOIN products p ON p.id=oi.product_id
+       WHERE o.id=$1 AND o.user_id=$2
+       GROUP BY o.id`,
       [req.params.id, req.user.id]
     );
     if (!rows[0]) throw new AppError('Sifariş tapılmadı.', 404);
-    res.json({ success: true, data: rows[0] });
+    res.json({ success: true, data: normalizeOrder(rows[0]) });
   } catch (err) { next(err); }
 };
 
@@ -117,47 +160,54 @@ const getAllOrders = async (req, res, next) => {
     let where = '';
     if (status) { params.push(status); where = 'WHERE o.status=$1'; }
 
-    const countParams = [...params];
-    const dataParams = [...params, parseInt(limit), offset];
     const pi = params.length + 1;
 
     const [countRes, ordersRes] = await Promise.all([
-      query(`SELECT COUNT(*) FROM orders o ${where}`, countParams),
+      query(`SELECT COUNT(*) FROM orders o ${where}`, [...params]),
       query(
-        `SELECT o.*, u.name as user_name, u.email as user_email,
-          COALESCE(json_agg(json_build_object('id',oi.id,'quantity',oi.quantity,
-            'product',json_build_object('id',p.id,'nameAz',p.name_az,'image',p.image))
-          ) FILTER (WHERE oi.id IS NOT NULL), '[]') as order_items
+        `SELECT o.*, u.name AS user_name, u.email AS user_email,
+          COALESCE(json_agg(json_build_object(
+            'id', oi.id, 'quantity', oi.quantity,
+            'product', json_build_object(
+              'id', p.id, 'nameAz', p.name_az, 'image', p.image
+            )
+          )) FILTER (WHERE oi.id IS NOT NULL), '[]') AS order_items
          FROM orders o
          LEFT JOIN users u ON u.id=o.user_id
          LEFT JOIN order_items oi ON oi.order_id=o.id
          LEFT JOIN products p ON p.id=oi.product_id
-         ${where} GROUP BY o.id,u.name,u.email
-         ORDER BY o.created_at DESC LIMIT $${pi} OFFSET $${pi+1}`,
-        dataParams
+         ${where}
+         GROUP BY o.id, u.name, u.email
+         ORDER BY o.created_at DESC
+         LIMIT $${pi} OFFSET $${pi + 1}`,
+        [...params, parseInt(limit), offset]
       ),
     ]);
 
     const total = parseInt(countRes.rows[0].count);
-    const orders = ordersRes.rows.map(r => ({
-      ...r,
-      user: { name: r.user_name, email: r.user_email },
-    }));
-    res.json({ success: true, data: orders, pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages: Math.ceil(total / parseInt(limit)) } });
+    res.json({
+      success: true,
+      data: ordersRes.rows.map(normalizeOrder),
+      pagination: {
+        page: parseInt(page), limit: parseInt(limit),
+        total, totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
   } catch (err) { next(err); }
 };
 
 const updateOrderStatus = async (req, res, next) => {
   try {
-    const valid = ['PENDING','CONFIRMED','PROCESSING','SHIPPED','DELIVERED','CANCELLED'];
+    const valid = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
     const { status } = req.body;
     if (!valid.includes(status)) throw new AppError('Yanlış status.', 400);
+
     const { rows } = await query(
       'UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
       [status, req.params.id]
     );
     if (!rows[0]) throw new AppError('Sifariş tapılmadı.', 404);
-    res.json({ success: true, message: 'Status yeniləndi.', data: rows[0] });
+    res.json({ success: true, message: 'Status yeniləndi.', data: normalizeOrder(rows[0]) });
   } catch (err) { next(err); }
 };
 
