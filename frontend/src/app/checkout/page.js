@@ -20,10 +20,12 @@ export default function CheckoutPage() {
   const { serverCart, fetchCart } = useCartStore();
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const { register, handleSubmit, formState: { errors }, setValue } = useForm();
 
   useEffect(() => {
+    setMounted(true);
     if (!isAuthenticated()) { router.push('/login'); return; }
     fetchCart();
   }, []);
@@ -52,6 +54,18 @@ export default function CheckoutPage() {
       setSubmitting(false);
     }
   };
+
+  if (!mounted) {
+    return (
+      <>
+        <Header /><CartDrawer />
+        <main className="page-container py-10">
+          <div className="skeleton h-96 rounded-2xl animate-pulse bg-slate-200" />
+        </main>
+        <Footer />
+      </>
+    );
+  }
 
   if (success) {
     return (
@@ -82,10 +96,9 @@ export default function CheckoutPage() {
         <Link href="/products" className="btn btn-ghost mb-6">
           <ArrowLeft className="w-4 h-4" /> Geri
         </Link>
-        <h1 className="section-title mb-8">Sifarişi tamamla</h1>
+        <h1 className="font-display text-2xl font-bold text-slate-900 mb-8">Sifarişi tamamla</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Form */}
           <div className="lg:col-span-2">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               <div className="card p-6">
@@ -119,21 +132,18 @@ export default function CheckoutPage() {
                     <label className="label">Ünvan</label>
                     <textarea {...register('address', { required: 'Ünvan tələb olunur' })}
                       className={`input resize-none ${errors.address ? 'input-error' : ''}`}
-                      rows={3}
-                      placeholder="Şəhər, rayon, küçə, ev nömrəsi" />
+                      rows={3} placeholder="Şəhər, rayon, küçə, ev nömrəsi" />
                     {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address.message}</p>}
                   </div>
                   <div>
                     <label className="label">Qeyd (isteğe bağlı)</label>
-                    <textarea {...register('notes')}
-                      className="input resize-none" rows={2}
+                    <textarea {...register('notes')} className="input resize-none" rows={2}
                       placeholder="Əlavə məlumat, qapı kodu və s." />
                   </div>
                 </div>
               </div>
 
-              <button type="submit" disabled={submitting || !items.length}
-                className="btn btn-primary btn-lg w-full">
+              <button type="submit" disabled={submitting || !items.length} className="btn btn-primary btn-lg w-full">
                 {submitting ? (
                   <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Göndərilir...</>
                 ) : (
@@ -148,29 +158,37 @@ export default function CheckoutPage() {
             <div className="card p-6 sticky top-20">
               <h2 className="font-display font-semibold text-lg mb-5">Sifariş xülasəsi</h2>
               <ul className="space-y-3 mb-5">
-                {items.map(item => (
-                  <li key={item.id} className="flex gap-3">
-                    <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
-                      {item.product?.image
-                        ? <Image src={getImageUrl(item.product.image)} alt={item.product.nameAz} width={56} height={56} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center text-xl">📦</div>
-                      }
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-800 line-clamp-1">{item.product?.nameAz}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{item.quantity} ədəd × {formatPrice(item.product?.price)}</p>
-                    </div>
-                    <span className="text-sm font-semibold text-slate-800 flex-shrink-0">
-                      {formatPrice(parseFloat(item.product?.price) * item.quantity)}
-                    </span>
-                  </li>
-                ))}
+                {items.map(item => {
+                  const imgUrl = getImageUrl(item.product?.image);
+                  return (
+                    <li key={item.id} className="flex gap-3">
+                      <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0">
+                        {imgUrl ? (
+                          <Image src={imgUrl} alt={item.product?.nameAz || ''} width={56} height={56}
+                            className="w-full h-full object-cover" unoptimized />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-xl">📦</div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 line-clamp-1">
+                          {item.product?.nameAz || item.product?.name}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {item.quantity} ədəd × {formatPrice(item.product?.price)}
+                        </p>
+                      </div>
+                      <span className="text-sm font-semibold text-slate-800 flex-shrink-0">
+                        {formatPrice(parseFloat(item.product?.price || 0) * item.quantity)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
               <hr className="border-slate-100 mb-4" />
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-slate-600">
-                  <span>Ara cəm:</span>
-                  <span>{formatPrice(total)}</span>
+                  <span>Ara cəm:</span><span>{formatPrice(total)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>Çatdırılma:</span>
