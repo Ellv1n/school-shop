@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useForm } from 'react-hook-form';
-import { ShoppingBag, CheckCircle, ArrowLeft, MapPin, Phone, User } from 'lucide-react';
+import { useForm, Controller } from 'react-hook-form';
+import { ShoppingBag, CheckCircle, ArrowLeft, MapPin, Phone, User, Train, ChevronDown } from 'lucide-react';
 import { useCartStore } from '@/store/cart.store';
 import { useAuthStore } from '@/store/auth.store';
 import { formatPrice, getImageUrl, getErrorMessage } from '@/lib/utils';
@@ -14,6 +14,28 @@ import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import CartDrawer from '@/components/shop/CartDrawer';
 
+// Bakı metro stansiyaları — tam siyahı
+const BAKU_METROS = [
+  // Xətai xətti (qırmızı)
+  { line: '🔴 İçərişəhər–Hövsan', stations: [
+    'İçərişəhər', 'Sahil', '28 May', 'Gənclik', 'Nəriman Nərimanov',
+    'Bakmil', 'Ulduz', 'Koroğlu', 'Qara Qarayev', 'Neftçilər',
+    'Xalqlar Dostluğu', 'Əhmədli', 'Həzi Aslanov', 'Hövsan',
+  ]},
+  // Elmlər xətti (yaşıl)
+  { line: '🟢 8 Noyabr–Dərnəgül', stations: [
+    '8 Noyabr', 'Avtovağzal', 'Memar Əcəmi', '20 Yanvar',
+    'İnşaatçılar', 'Elmlər Akademiyası', 'İstiqlaliyyət',
+    'Cəfər Cabbarlı', 'Nizami', 'Əhmədli',
+  ]},
+  // Cəfər Cabbarlı qovşağı
+  { line: '🔵 Digər', stations: [
+    'Dərnəgül', 'Azadlıq Prospekti', 'Nəsimi', 'Həzi Aslanov (Cənub)',
+  ]},
+];
+
+const ALL_STATIONS = BAKU_METROS.flatMap(g => g.stations.map(s => ({ station: s, line: g.line })));
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
@@ -21,8 +43,10 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [deliveryType, setDeliveryType] = useState('address'); // 'address' | 'metro'
 
-  const { register, handleSubmit, formState: { errors }, setValue } = useForm();
+  const { register, handleSubmit, formState: { errors }, setValue, watch, control } = useForm();
+  const selectedMetro = watch('metroStation');
 
   useEffect(() => {
     setMounted(true);
@@ -34,9 +58,18 @@ export default function CheckoutPage() {
     if (user) {
       setValue('customerName', user.name || '');
       setValue('customerPhone', user.phone || '');
-      setValue('address', user.address || '');
+      if (deliveryType === 'address') {
+        setValue('address', user.address || '');
+      }
     }
-  }, [user]);
+  }, [user, deliveryType]);
+
+  // When metro selected → auto-fill address
+  useEffect(() => {
+    if (deliveryType === 'metro' && selectedMetro) {
+      setValue('address', `Metro stansiyası: ${selectedMetro}`);
+    }
+  }, [selectedMetro, deliveryType]);
 
   const items = serverCart?.items || [];
   const total = parseFloat(serverCart?.total || 0);
@@ -45,7 +78,15 @@ export default function CheckoutPage() {
     if (!items.length) { toast.error('Səbətiniz boşdur'); return; }
     setSubmitting(true);
     try {
-      await api.post('/orders', data);
+      const payload = {
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        address: deliveryType === 'metro'
+          ? `Metro stansiyası: ${data.metroStation}${data.metroNote ? ' — ' + data.metroNote : ''}`
+          : data.address,
+        notes: data.notes || undefined,
+      };
+      await api.post('/orders', payload);
       setSuccess(true);
       await fetchCart();
     } catch (err) {
@@ -100,7 +141,9 @@ export default function CheckoutPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+
+              {/* Personal info */}
               <div className="card p-6">
                 <h2 className="font-display font-semibold text-lg mb-5 flex items-center gap-2">
                   <User className="w-5 h-5 text-primary-600" /> Şəxsi məlumatlar
@@ -108,42 +151,144 @@ export default function CheckoutPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="label">Ad Soyad</label>
-                    <input {...register('customerName', { required: 'Ad tələb olunur' })}
+                    <input
+                      {...register('customerName', { required: 'Ad tələb olunur' })}
                       className={`input ${errors.customerName ? 'input-error' : ''}`}
-                      placeholder="Aynur Həsənova" />
+                      placeholder="Aynur Həsənova"
+                    />
                     {errors.customerName && <p className="text-red-500 text-xs mt-1">{errors.customerName.message}</p>}
                   </div>
                   <div>
                     <label className="label">Telefon</label>
-                    <input {...register('customerPhone', { required: 'Telefon tələb olunur' })}
+                    <input
+                      {...register('customerPhone', { required: 'Telefon tələb olunur' })}
                       className={`input ${errors.customerPhone ? 'input-error' : ''}`}
-                      placeholder="+994 50 123 45 67" />
+                      placeholder="+994 50 123 45 67"
+                    />
                     {errors.customerPhone && <p className="text-red-500 text-xs mt-1">{errors.customerPhone.message}</p>}
                   </div>
                 </div>
               </div>
 
+              {/* Delivery type toggle */}
               <div className="card p-6">
                 <h2 className="font-display font-semibold text-lg mb-5 flex items-center gap-2">
-                  <MapPin className="w-5 h-5 text-primary-600" /> Çatdırılma ünvanı
+                  <MapPin className="w-5 h-5 text-primary-600" /> Çatdırılma üsulu
                 </h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="label">Ünvan</label>
-                    <textarea {...register('address', { required: 'Ünvan tələb olunur' })}
-                      className={`input resize-none ${errors.address ? 'input-error' : ''}`}
-                      rows={3} placeholder="Şəhər, rayon, küçə, ev nömrəsi" />
-                    {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address.message}</p>}
+
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryType('address')}
+                    className={`flex items-center gap-2.5 p-4 rounded-xl border-2 transition-all text-left ${
+                      deliveryType === 'address'
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <MapPin className={`w-5 h-5 ${deliveryType === 'address' ? 'text-primary-600' : 'text-slate-400'}`} />
+                    <div>
+                      <p className={`font-medium text-sm ${deliveryType === 'address' ? 'text-primary-700' : 'text-slate-700'}`}>
+                        Ünvana çatdırılma
+                      </p>
+                      <p className="text-xs text-slate-400">Ev, ofis və s.</p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryType('metro')}
+                    className={`flex items-center gap-2.5 p-4 rounded-xl border-2 transition-all text-left ${
+                      deliveryType === 'metro'
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <Train className={`w-5 h-5 ${deliveryType === 'metro' ? 'text-primary-600' : 'text-slate-400'}`} />
+                    <div>
+                      <p className={`font-medium text-sm ${deliveryType === 'metro' ? 'text-primary-700' : 'text-slate-700'}`}>
+                        Metro stansiyası
+                      </p>
+                      <p className="text-xs text-slate-400">Bakı metrosu</p>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Address input */}
+                {deliveryType === 'address' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="label">Ünvan</label>
+                      <textarea
+                        {...register('address', { required: 'Ünvan tələb olunur' })}
+                        className={`input resize-none ${errors.address ? 'input-error' : ''}`}
+                        rows={3}
+                        placeholder="Şəhər, rayon, küçə, ev nömrəsi"
+                      />
+                      {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address.message}</p>}
+                    </div>
                   </div>
-                  <div>
-                    <label className="label">Qeyd (isteğe bağlı)</label>
-                    <textarea {...register('notes')} className="input resize-none" rows={2}
-                      placeholder="Əlavə məlumat, qapı kodu və s." />
+                )}
+
+                {/* Metro selector */}
+                {deliveryType === 'metro' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="label">Metro stansiyası seçin</label>
+                      <div className="relative">
+                        <select
+                          {...register('metroStation', { required: deliveryType === 'metro' ? 'Metro stansiyası seçin' : false })}
+                          className={`input appearance-none pr-10 ${errors.metroStation ? 'input-error' : ''}`}
+                        >
+                          <option value="">— Stansiya seçin —</option>
+                          {BAKU_METROS.map(group => (
+                            <optgroup key={group.line} label={group.line}>
+                              {group.stations.map(station => (
+                                <option key={station} value={station}>{station}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                      </div>
+                      {errors.metroStation && <p className="text-red-500 text-xs mt-1">{errors.metroStation.message}</p>}
+                    </div>
+
+                    {selectedMetro && (
+                      <div className="flex items-center gap-2 p-3 bg-primary-50 rounded-xl text-sm text-primary-700">
+                        <Train className="w-4 h-4 flex-shrink-0" />
+                        <span><strong>{selectedMetro}</strong> stansiyasında çatdırılacaq</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="label">Əlavə məlumat (isteğe bağlı)</label>
+                      <input
+                        {...register('metroNote')}
+                        className="input"
+                        placeholder="Məs: çıxış 2, saat 14:00"
+                      />
+                    </div>
                   </div>
+                )}
+
+                {/* Notes */}
+                <div className="mt-4">
+                  <label className="label">Qeyd (isteğe bağlı)</label>
+                  <textarea
+                    {...register('notes')}
+                    className="input resize-none"
+                    rows={2}
+                    placeholder="Sürücü üçün əlavə məlumat..."
+                  />
                 </div>
               </div>
 
-              <button type="submit" disabled={submitting || !items.length} className="btn btn-primary btn-lg w-full">
+              <button
+                type="submit"
+                disabled={submitting || !items.length}
+                className="btn btn-primary btn-lg w-full"
+              >
                 {submitting ? (
                   <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Göndərilir...</>
                 ) : (
@@ -200,6 +345,13 @@ export default function CheckoutPage() {
                   <span>{formatPrice(total >= 50 ? total : total + 5)}</span>
                 </div>
               </div>
+
+              {deliveryType === 'metro' && selectedMetro && (
+                <div className="mt-4 p-3 bg-blue-50 rounded-xl flex items-center gap-2 text-sm text-blue-700">
+                  <Train className="w-4 h-4 flex-shrink-0" />
+                  <span><strong>{selectedMetro}</strong> metrosuna çatdırılır</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
